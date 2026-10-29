@@ -2,10 +2,15 @@ from axiprop.containers import ScalarFieldEnvelope
 from axiprop.lib import PropagatorFFT2, PropagatorResampling
 from scipy.constants import c, e, epsilon_0, m_e
 
-from lasy.backend import hilbert, to_cpu, to_gpu, use_cupy, xp
+from lasy.backend import hilbert, to_cpu, to_gpu, use_cupy, xp, chunk
 
 from .grid import Grid
 
+def print_mem():
+    mempool = xp.get_default_memory_pool()
+    mempool.free_all_blocks()
+    print("untils used_bytes", mempool.used_bytes() // 2**20, "MiB")
+    print("untils total_bytes", mempool.total_bytes() // 2**20, "MiB")
 
 def compute_laser_energy(dim, grid):
     """
@@ -43,7 +48,9 @@ def compute_laser_energy(dim, grid):
     dV = get_grid_cell_volume(grid, dim)
 
     if dim == "xyt":
-        energy = ((dV * epsilon_0) * abs(envelope) ** 2).sum()
+        energy = 0
+        for envelope_, in chunk(envelope):
+            energy += (dV * epsilon_0) * (abs(envelope) ** 2).sum()
     else:  # dim == "rt":
         energy = (
             dV[xp.newaxis, :, xp.newaxis] * epsilon_0 * abs(envelope[:, :, :]) ** 2
@@ -77,10 +84,12 @@ def normalize_energy(dim, energy, grid):
     grid: a Grid object
         Contains value of the laser envelope and metadata.
     """
+    print_mem()
     if energy is None:
         return
 
     current_energy = compute_laser_energy(dim, grid)
+    print_mem()
     if current_energy == 0.0:
         print("Field is zero everywhere, normalization will be skipped")
     else:
@@ -88,6 +97,7 @@ def normalize_energy(dim, energy, grid):
         field = grid.get_temporal_field()
         field *= norm_factor
         grid.set_temporal_field(field)
+    print_mem()
 
 
 def normalize_peak_field_amplitude(amplitude, grid):

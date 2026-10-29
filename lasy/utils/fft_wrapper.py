@@ -1,5 +1,10 @@
 from lasy.backend import xp
 
+def print_mem():
+    mempool = xp.get_default_memory_pool()
+    mempool.free_all_blocks()
+    print("fft used_bytes", mempool.used_bytes() // 2**20, "MiB")
+    print("fft total_bytes", mempool.total_bytes() // 2**20, "MiB")
 
 def fft(which, arr_in, axes_in, from_domain, verbose=0):
     """
@@ -70,10 +75,10 @@ def fft(which, arr_in, axes_in, from_domain, verbose=0):
             xfftshift = xp.fft.fftshift
 
         # Do the FFT
-        arr = xp.copy(arr_in)
+        arr_out = arr_in
         if shift_before:
-            arr = xfftshift(arr, axes=(0, 1))
-        arr_out = xfft(arr, axes=(0, 1))
+            arr_out = xfftshift(arr_out, axes=(0, 1))
+        arr_out = xfft(arr_out, axes=(0, 1))
 
         # Shift after FFT
         if shift_after:
@@ -86,6 +91,8 @@ def fft(which, arr_in, axes_in, from_domain, verbose=0):
                 print("fft of size 1: do nothing")
             return arr_in, axes_in
 
+        print_mem()
+
         # Set right FFT functions
         if inverse:
             xfft = xp.fft.ifft
@@ -95,16 +102,22 @@ def fft(which, arr_in, axes_in, from_domain, verbose=0):
             xfftshift = xp.fft.fftshift
 
         # Do the FFT
-        arr = xp.copy(arr_in)
+        arr_out = arr_in
+        print_mem()
         if shift_before:
-            arr = xfftshift(arr, axes=-1)
-        arr_out = xfft(arr, axis=-1)
+            arr_out = xfftshift(arr_out, axes=-1)
+
+        print_mem()
+        arr_out = xfft(arr_out, axis=-1)
+        print_mem()
 
         # Shift after FFT
         if shift_after:
             arr_out = xfftshift(arr_out, axes=-1)
 
     axes_out = frequency_axis(which, axes_in, from_domain)
+
+    print_mem()
 
     return arr_out, axes_out
 

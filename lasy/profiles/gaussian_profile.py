@@ -1,7 +1,13 @@
-from lasy.backend import xp
+from lasy.backend import xp, chunk
 
 from .profile import Profile
 
+
+def print_mem():
+    mempool = xp.get_default_memory_pool()
+    mempool.free_all_blocks()
+    print("eval used_bytes", mempool.used_bytes() // 2**20, "MiB")
+    print("eval total_bytes", mempool.total_bytes() // 2**20, "MiB")
 
 class GaussianProfile(Profile):
     r"""
@@ -172,50 +178,68 @@ class GaussianProfile(Profile):
             Contains the value of the longitudinal envelope at the
             specified points. This array has the same shape as the array t.
         """
-        inv_tau2 = self.tau ** (-2)
-        inv_complex_waist_2 = 1.0 / (
-            self.w0**2 * (1.0 + 2.0j * self.z_foc / (self.k0 * self.w0**2))
-        )
-        stretch_factor = (
-            1
-            + 4.0
-            * (-self.zeta + self.beta * self.z_foc)
-            * inv_tau2
-            * (-self.zeta + self.beta * self.z_foc)
-            * inv_complex_waist_2
-            + 2.0j * (-self.phi2 - self.beta**2 * self.k0 * self.z_foc) * inv_tau2
-        )
-        stc_exponent = (
-            1.0
-            / stretch_factor
-            * inv_tau2
-            * (
-                t
-                - self.t_peak
-                - self.beta
-                * self.k0
-                * (x * xp.cos(self.stc_theta) + y * xp.sin(self.stc_theta))
-                - 2.0j
-                * (x * xp.cos(self.stc_theta) + y * xp.sin(self.stc_theta))
-                * (-self.zeta - self.beta * self.z_foc)
+        print("x", x.shape)
+        print("y", y.shape)
+        print("t", t.shape)
+
+        print_mem()
+
+        envelope = xp.empty(
+            xp.broadcast_shapes(x.shape, y.shape, t.shape),
+            dtype=xp.complex128)
+
+        print_mem()
+
+        for x_, y_, t_, envelope_ in chunk(x, y, t, envelope):
+
+            inv_tau2 = self.tau ** (-2)
+            inv_complex_waist_2 = 1.0 / (
+                self.w0**2 * (1.0 + 2.0j * self.z_foc / (self.k0 * self.w0**2))
+            )
+            stretch_factor = (
+                1
+                + 4.0
+                * (-self.zeta + self.beta * self.z_foc)
+                * inv_tau2
+                * (-self.zeta + self.beta * self.z_foc)
                 * inv_complex_waist_2
+                + 2.0j * (-self.phi2 - self.beta**2 * self.k0 * self.z_foc) * inv_tau2
             )
-            ** 2
-        )
-        # Term for wavefront curvature + Gouy phase
-        diffract_factor = 1.0 - 1j * self.z_foc_over_zr
-        # Calculate the argument of the complex exponential
-        exp_argument = -((x - self.x0) ** 2 + (y - self.y0) ** 2) / (
-            self.w0**2 * diffract_factor
-        )
-        # Get the profile
-        envelope = (
-            xp.exp(
-                -stc_exponent
-                + exp_argument
-                + 1.0j * (self.cep_phase + self.omega0 * self.t_peak)
+            stc_exponent = (
+                1.0
+                / stretch_factor
+                * inv_tau2
+                * (
+                    t_
+                    - self.t_peak
+                    - self.beta
+                    * self.k0
+                    * (x_ * xp.cos(self.stc_theta) + y_ * xp.sin(self.stc_theta))
+                    - 2.0j
+                    * (x_ * xp.cos(self.stc_theta) + y_ * xp.sin(self.stc_theta))
+                    * (-self.zeta - self.beta * self.z_foc)
+                    * inv_complex_waist_2
+                )
+                ** 2
             )
-            / diffract_factor
-        )
+            # Term for wavefront curvature + Gouy phase
+            diffract_factor = 1.0 - 1j * self.z_foc_over_zr
+            # Calculate the argument of the complex exponential
+            exp_argument = -((x_ - self.x0) ** 2 + (y_- self.y0) ** 2) / (
+                self.w0**2 * diffract_factor
+            )
+            # Get the profile
+            envelope_[:] = (
+                xp.exp(
+                    -stc_exponent
+                    + exp_argument
+                    + 1.0j * (self.cep_phase + self.omega0 * self.t_peak)
+                )
+                / diffract_factor
+            )
+
+        print("envelope", envelope.shape)
+
+        print_mem()
 
         return envelope

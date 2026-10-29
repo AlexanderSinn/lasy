@@ -66,6 +66,42 @@ else:
         """Convert array from numpy to cupy."""
         return arr
 
+import numpy as np
+def chunk(*arrays, max_size=10_000_000):
+
+    def get_slice(a, b, e):
+        return a[
+            tuple( slice(int(b[i]), int(e[i])) if a.shape[i] > 1 else slice(None, None) for i in range(len(e)))
+        ]
+
+    s = np.broadcast_shapes(*[a.shape for a in arrays])
+
+    total_size = np.array(s)
+    tile_size = total_size.copy()
+    prod = 1
+    for i in range(len(s) - 1, -1, -1):
+        tile_size[i] = min(
+            tile_size[i],
+                max(1, max_size // prod)
+            )
+
+        prod *= tile_size[i]
+    num_tiles = total_size // tile_size
+
+    begin = np.zeros(len(num_tiles))
+
+    while True:
+        end = begin + tile_size
+        yield tuple(get_slice(a, begin, end) for a in arrays)
+
+        for i in range(len(s) -1, -1, -1):
+            if end[i] < total_size[i]:
+                begin[i] += tile_size[i]
+                break
+            else:
+                begin[i] = 0
+        else:
+            break
 
 __all__ = [
     "lasy_backend",
@@ -77,4 +113,5 @@ __all__ = [
     "hilbert",
     "zoom_fft",
     "j0",
+    "chunk",
 ]

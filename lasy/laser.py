@@ -11,6 +11,11 @@ from lasy.utils.laser_utils import (
 from lasy.utils.openpmd_helper import write_to_openpmd_file
 from lasy.utils.plotting import show_laser
 
+def print_mem():
+    mempool = xp.get_default_memory_pool()
+    mempool.free_all_blocks()
+    print("laser used_bytes", mempool.used_bytes() // 2**20, "MiB")
+    print("laser total_bytes", mempool.total_bytes() // 2**20, "MiB")
 
 class Laser:
     """
@@ -107,6 +112,8 @@ class Laser:
     def __init__(
         self, dim, lo, hi, npoints, profile, n_azimuthal_modes=1, n_theta_evals=None
     ):
+        print_mem()
+
         self.grid = Grid(
             dim,
             lo,
@@ -116,14 +123,21 @@ class Laser:
             is_cw=profile.is_cw,
             is_plane_wave=profile.is_plane_wave,
         )
+        print_mem()
         self.dim = dim
         self.profile = profile
         self.output_iteration = 0  # Incremented each time write_to_file is called
 
         # Create the grid on which to evaluate the laser, evaluate it
         if self.dim == "xyt":
-            x, y, t = xp.meshgrid(*self.grid.axes, indexing="ij")
+            print_mem()
+            # x, y, t = xp.meshgrid(*self.grid.axes, indexing="ij")
+            x = self.grid.axes[0][:, None, None]
+            y = self.grid.axes[1][None, :, None]
+            t = self.grid.axes[2][None, None, :]
+
             self.grid.set_temporal_field(profile.evaluate(x, y, t))
+            print_mem()
         elif self.dim == "rt":
             profile_rt = profile.dim == "rt" if hasattr(profile, "dim") else False
             if profile_rt:

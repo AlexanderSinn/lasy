@@ -118,7 +118,7 @@ class Grid:
 
         # Data
         if dim == "xyt":
-            self.shape = self.npoints
+            self.shape = tuple(self.npoints)
         elif dim == "rt":
             # Azimuthal modes are arranged in the following order:
             # 0, 1, 2, ..., n_azimuthal_modes-1, -n_azimuthal_modes+1, ..., -1
@@ -126,9 +126,9 @@ class Grid:
             self.shape = (ncomp, self.npoints[0], self.npoints[1])
 
         self.set_is_envelope(is_envelope)
-        self.temporal_field = xp.zeros(self.shape, dtype=self.dtype)
+        self.temporal_field = None
         self.temporal_field_valid = False
-        self.spectral_field = xp.zeros(self.shape, dtype="complex128")
+        self.spectral_field = None
         self.spectral_field_valid = False
         self.position = position
 
@@ -159,9 +159,13 @@ class Grid:
         field : ndarray of complexs
             The temporal field.
         """
-        assert field.shape == self.temporal_field.shape
+        assert field.shape == self.shape
         assert field.dtype == self.dtype
-        self.temporal_field[:, :, :] = to_gpu(field)
+        if self.temporal_field_valid:
+            self.temporal_field[:, :, :] = to_gpu(field)
+        else:
+            self.temporal_field = to_gpu(field)
+            self.spectral_field = None
         self.temporal_field_valid = True
         self.spectral_field_valid = False  # Invalidates the spectral field
 
@@ -174,9 +178,13 @@ class Grid:
         field : ndarray of complexs
             The spectral field.
         """
-        assert field.shape == self.spectral_field.shape
+        assert field.shape == self.shape
         assert field.dtype == "complex128"
-        self.spectral_field[:, :, :] = to_gpu(field)
+        if self.spectral_field_valid:
+            self.spectral_field[:, :, :] = to_gpu(field)
+        else:
+            self.spectral_field = to_gpu(field)
+            self.temporal_field = None
         self.spectral_field_valid = True
         self.temporal_field_valid = False  # Invalidates the temporal field
 
@@ -192,8 +200,6 @@ class Grid:
         field : ndarray of complexs
             The temporal field.
         """
-        # We return a copy, so that the user cannot modify
-        # the original field, unless set_temporal_field is called
         if self.temporal_field_valid:
             pass
         elif self.spectral_field_valid:
@@ -201,7 +207,9 @@ class Grid:
         else:
             raise ValueError("Both temporal and spectral fields are invalid")
 
-        return self.temporal_field.copy()
+        ret = self.temporal_field.view()
+        ret.flags.writeable = False
+        return ret
 
     def get_spectral_field(self):
         """
@@ -232,7 +240,9 @@ class Grid:
         else:
             raise ValueError("Both temporal and spectral fields are invalid")
 
-        return self.spectral_field.copy(), self.spectral_axis.copy()
+        ret = self.spectral_field.view()
+        ret.flags.writeable = False
+        return ret, self.spectral_axis.copy()
 
     def temporal2spectral_fft(self):
         """

@@ -3,12 +3,17 @@ from copy import deepcopy
 from scipy.constants import c
 from scipy.differentiate import derivative
 
-from lasy.backend import xp
+from lasy.backend import xp, chunk
 from lasy.utils.fft_wrapper import fft, frequency_axis
 from lasy.utils.hankel import DHT
 
 from .propagator import Propagator
 
+def print_mem(s):
+    mempool = xp.get_default_memory_pool()
+    mempool.free_all_blocks()
+    print("angspec", s, "used_bytes", mempool.used_bytes() // 2**20, "MiB")
+    print("angspec", s, "total_bytes", mempool.total_bytes() // 2**20, "MiB")
 
 class AngularSpectrumPropagator(Propagator):
     r"""
@@ -126,8 +131,12 @@ class AngularSpectrumPropagator(Propagator):
 
         self.update(omega0=omega0, dim=dim, n=self.n)
 
+        print_mem("1")
+
         if grid_out is None:
             grid_out = deepcopy(grid_in)
+
+        print_mem("2")
 
         if self.dim == "rt":
             field = self._propagate_mrt(distance, grid_in)
@@ -157,10 +166,15 @@ class AngularSpectrumPropagator(Propagator):
 
     def _propagate_xyt(self, distance, grid_in):
         # Get the spectral field in the spatial domain
+        print_mem("3")
+
         field, omega = grid_in.get_spectral_field()
+        print_mem("4")
 
         omega += self.omega0
         kz = omega / c
+
+        print_mem("5")
 
         # get field in k-space and spatial frequency axes
         field_kspace, axes_freq = fft(
@@ -169,6 +183,9 @@ class AngularSpectrumPropagator(Propagator):
             axes_in=[grid_in.axes[0], grid_in.axes[1]],
             from_domain="frequency",
         )
+        field = None
+
+        print_mem("6")
 
         kx = 2 * xp.pi * axes_freq[0]
         ky = 2 * xp.pi * axes_freq[1]
@@ -176,30 +193,45 @@ class AngularSpectrumPropagator(Propagator):
         # Calculate the refractive index if it is a function of wavelength
         n = self.n(2 * xp.pi * c / omega) if callable(self.n) else self.n
 
+        print_mem("7")
+
         # Calculate the phase shift in k-space
-        phase = (
-            distance
-            * n
-            * (kz[None, None, :] ** 2 - kx[:, None, None] ** 2 - ky[None, :, None] ** 2)
-            ** 0.5
-        )
+
+
+        print_mem("8")
 
         # compensate group delay to keep pulse centered in grid
         if xp.ndim(n) > 0:
             dndom = xp.gradient(n, omega)
             dndom = xp.interp(xp.array([self.omega0]), omega, dndom)[0]
             n0 = xp.interp(xp.array([self.omega0]), omega, n)[0]
+            n_array = n
         else:
             dndom = 0
             n0 = n
+            n_array = xp.array(n)[None]
 
         v_group = c / (n0 + self.omega0 * dndom)
         gd = distance / v_group
+        phase_gd_offset = gd * (omega - self.omega0)[None, None, :]
 
-        phase = phase - gd * (omega - self.omega0)[None, None, :]
+        for field_kspace_, kx_, ky_, kz_, phase_gd_offset_, n_ in chunk(field_kspace,
+            kx[:, None, None], ky[None, :, None], kz[None, None, :],
+            phase_gd_offset, n_array[None, None, :]):
 
-        # Apply the phase shift to the field in k-space
-        field_kspace *= xp.exp(1j * phase)
+            phase = (
+                distance
+                * n_
+                * (kz_ ** 2 - kx_ ** 2 - ky_ ** 2)
+                ** 0.5
+            )
+
+            phase -= phase_gd_offset_
+
+            # Apply the phase shift to the field in k-space
+            field_kspace_ *= xp.exp(1j * phase)
+
+        print_mem("9")
 
         # Transform back to the spatial domain
         field, _ = fft(
@@ -208,6 +240,9 @@ class AngularSpectrumPropagator(Propagator):
             axes_in=(kx / (2 * xp.pi), ky / (2 * xp.pi)),
             from_domain="real",
         )
+        field_kspace = None
+
+        print_mem("10")
 
         return field
 
