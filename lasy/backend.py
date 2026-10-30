@@ -67,8 +67,7 @@ else:
         return arr
 
 import numpy as np
-def chunk(*arrays, max_size=10_000_000):
-
+def chunk(*arrays, max_size=100, dims=None):
     def get_slice(a, b, e):
         return a[
             tuple( slice(int(b[i]), int(e[i])) if a.shape[i] > 1 else slice(None, None) for i in range(len(e)))
@@ -78,14 +77,23 @@ def chunk(*arrays, max_size=10_000_000):
 
     total_size = np.array(s)
     tile_size = total_size.copy()
+
+    if dims is None:
+        dims = tuple(range(len(tile_size)))
+
     prod = 1
     for i in range(len(s) - 1, -1, -1):
-        tile_size[i] = min(
-            tile_size[i],
-                max(1, max_size // prod)
-            )
+        if i not in dims:
+            prod *= total_size[i]
 
-        prod *= tile_size[i]
+    for i in range(len(s) - 1, -1, -1):
+        if i in dims:
+            tile_size[i] = min(
+                total_size[i],
+                    max(1, max_size // prod)
+                )
+            prod *= tile_size[i]
+
     num_tiles = total_size // tile_size
 
     begin = np.zeros(len(num_tiles))
